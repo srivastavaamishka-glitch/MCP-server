@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "public",
+  "functions": { "api/index.js": { "maxDuration": 30 } },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api" },
+    { "source": "/h/:path*", "destination": "/api" },
+    { "source": "/demo-api/:path*", "destination": "/api" },
+    { "source": "/demo-api-auth/:path*", "destination": "/api" },
+    { "source": "/health", "destination": "/api" }
+  ]
+}

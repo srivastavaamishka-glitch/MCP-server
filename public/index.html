@@ -74,7 +74,7 @@
 const $ = (id) => document.getElementById(id);
 // DOM builder that only ever sets textContent: specs are untrusted input, so nothing from them touches innerHTML.
 const h = (tag, attrs = {}, ...kids) => { const e = Object.assign(document.createElement(tag), attrs); e.append(...kids.flat().filter((k) => k != null)); return e; };
-let sid = null, events = null;
+let sid = null, events = null, stateless = false, lastCfg = null, prevTools = null;
 
 const api = async (path, body) => {
   const r = await fetch(path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : undefined);
@@ -97,8 +97,10 @@ function renderTool(t) {
   const run = h("button", { className: "primary", textContent: "Run tool", onclick: async () => {
     run.disabled = true; out.hidden = false; out.textContent = "…";
     try {
-      const r = await api("/api/call", { id: sid, tool: t.name, args: JSON.parse(args.value || "{}") });
+      const a = JSON.parse(args.value || "{}"), t0 = Date.now();
+      const r = await api("/api/call", stateless ? { config: lastCfg, tool: t.name, args: a } : { id: sid, tool: t.name, args: a });
       out.textContent = r.content[0].text; out.style.color = r.isError ? "var(--bad)" : "";
+      if (stateless) addLog({ ts: Date.now(), tool: t.name, args: a, ms: Date.now() - t0, isError: !!r.isError, preview: r.content[0].text.split("\n")[0] });
     } catch (e) { out.textContent = "Error: " + e.message; out.style.color = "var(--bad)"; }
     run.disabled = false;
   } });
@@ -115,11 +117,13 @@ function render(s) {
   if (s.skipped.length) $("tools").append(h("div", { className: "hint", textContent: "Removed by read-only mode (not present in the protocol layer): " + s.skipped.join(", ") }));
   const c = s.connect;
   $("connect").replaceChildren(
-    h("div", { className: "hint", textContent: "Hosted endpoint (Streamable HTTP)" }), copyable(c.streamableHttp),
-    h("div", { className: "hint", textContent: "Claude Code" }), copyable(c.claudeCode),
+    ...(c.streamableHttp ? [
+      h("div", { className: "hint", textContent: "Hosted endpoint (Streamable HTTP)" }), copyable(c.streamableHttp),
+      h("div", { className: "hint", textContent: "Claude Code" }), copyable(c.claudeCode)]
+      : [h("div", { className: "hint", textContent: s.hostedNote || "No hosted endpoint for this configuration." })]),
     h("div", { className: "hint", textContent: "Run locally (stdio)" }), copyable(c.npx),
     h("div", { className: "hint", textContent: "Docker" }), copyable(c.docker),
-    h("div", { className: "hint", textContent: "Legacy SSE: " + c.sse }));
+    c.sse ? h("div", { className: "hint", textContent: "Legacy SSE: " + c.sse }) : null);
 }
 
 function showDiff(d) {
@@ -131,31 +135,40 @@ function showDiff(d) {
     ...d.changed.map((x) => h("span", { className: "chg", textContent: "~ " + x }))) : "");
 }
 
+const addLog = (l) => $("log").prepend(h("div", { className: "log" + (l.isError ? " bad" : "") },
+  `${new Date(l.ts).toLocaleTimeString()}  ${l.tool}(${JSON.stringify(l.args ?? {})})  →  ${l.preview}  [${l.ms}ms]`));
+const diffMaps = (a, b) => ({ added: [...b.keys()].filter((k) => !a.has(k)), removed: [...a.keys()].filter((k) => !b.has(k)), changed: [...b.keys()].filter((k) => a.has(k) && a.get(k) !== b.get(k)) });
+
 function listen() {
   events?.close();
   events = new EventSource("/api/events/" + sid);
-  events.addEventListener("call", (e) => {
-    const l = JSON.parse(e.data);
-    $("log").prepend(h("div", { className: "log" + (l.isError ? " bad" : "") },
-      `${new Date(l.ts).toLocaleTimeString()}  ${l.tool}(${JSON.stringify(l.args ?? {})})  →  ${l.preview}  [${l.ms}ms]`));
-  });
+  events.addEventListener("call", (e) => addLog(JSON.parse(e.data)));
   events.addEventListener("change", async (e) => { showDiff(JSON.parse(e.data)); render(await api("/api/session/" + sid)); });
 }
 
 $("gen").onclick = async () => {
   $("err").textContent = ""; $("gen").disabled = true;
   try {
-    const s = await api("/api/generate", {
-      id: sid, spec: $("spec").value, readOnly: $("ro").checked, baseUrl: $("base").value,
+    const cfg = {
+      spec: $("spec").value, readOnly: $("ro").checked, baseUrl: $("base").value,
       auth: { bearer: $("bearer").value, apiKey: $("apikey").value, apiKeyName: $("keyname").value },
-    });
-    const fresh = sid !== s.id; sid = s.id;
-    render(s); showDiff(fresh ? null : s.diff);
-    if (fresh) listen();
+    };
+    const s = await api("/api/generate", { id: sid, ...cfg });
+    lastCfg = cfg; stateless = !!s.stateless;
+    render(s);
+    if (stateless) {
+      // No server-side session on serverless hosts: diff against the previous result in the browser.
+      const now = new Map(s.tools.map((t) => [t.name, JSON.stringify([t.description, t.inputSchema])]));
+      showDiff(prevTools && diffMaps(prevTools, now)); prevTools = now;
+    } else {
+      const fresh = sid !== s.id; sid = s.id;
+      showDiff(fresh ? null : s.diff);
+      if (fresh) listen();
+    }
   } catch (e) { $("err").textContent = e.message; }
   $("gen").disabled = false;
 };
-$("reset").onclick = () => { sid = null; events?.close(); $("tools").replaceChildren(); $("connect").replaceChildren(); $("log").replaceChildren(); $("diff").replaceChildren(); $("meta").textContent = ""; };
+$("reset").onclick = () => { sid = null; prevTools = null; events?.close(); $("tools").replaceChildren(); $("connect").replaceChildren(); $("log").replaceChildren(); $("diff").replaceChildren(); $("meta").textContent = ""; };
 const demo = (secure) => async () => {
   const cfg = await api("/api/config");
   $("spec").value = location.origin + "/demo/openapi.yaml";

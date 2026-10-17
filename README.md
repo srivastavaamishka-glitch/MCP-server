@@ -81,6 +81,17 @@ The same process mounts the demo: `/demo/openapi.yaml`, an open mock API at `/de
 
 `render.yaml` is included (Render: New → Blueprint). Any Node host works: build `npm ci --include=dev --ignore-scripts && npm run build`, start `node dist/web.js`, health check `/health`. Or `docker run -p 3000:3000 --entrypoint node anything-to-mcp dist/web.js`.
 
+### Deploy on Vercel
+
+The same app runs on Vercel in **stateless mode** (`api/index.js` + `vercel.json`): there is no server-side session, so nothing breaks when a serverless instance is recycled.
+
+1. Push the repo to GitHub, then Vercel -> Add New -> Project -> import it. Framework preset **Other**; build and output settings come from `vercel.json`.
+2. Add the environment variable `SESSION_SECRET` (any long random string). It encrypts the hosted-endpoint token, which is what lets an endpoint carry credentials safely. Optionally set `REPO_SLUG`.
+3. Deploy, then use the **production** domain. Preview deployments can sit behind Vercel Deployment Protection, which blocks the app from fetching its own demo spec.
+4. Open the URL -> "Load demo" -> "Generate server".
+
+Stateless mode differences: the hosted endpoint is `POST /h/<token>/mcp` (Streamable HTTP, no SSE, no GET stream), and it is only offered for specs given as a URL; the live log shows calls made from the page only; spec edits are picked up within about 60 seconds instead of instantly; the mock demo API keeps its data in memory per instance, so it can reset. Run it locally with `STATELESS=1 npm start`.
+
 ## Limitations to know about
 
 - **Hosted mode is a demo, not a multi-tenant service.** Sessions and the credentials in them live in process memory (capped at 100, lost on restart). The unguessable session id is the only access control on `/h/<id>/*`. Do not put real production credentials into a public instance without adding authentication in front.
@@ -98,7 +109,11 @@ src/parser.ts     spec -> ToolDefinition[] (+ read-only filter, Draft-07 convers
 src/executor.ts   ToolDefinition + args -> HTTP request (validation, auth, error shaping)
 src/server.ts     Engine (hot reload, call log), MCP Server factory, stdio/HTTP/SSE wiring
 src/cli.ts        npx / docker entrypoint
-src/web.ts        dashboard API, hosted MCP endpoints, SSRF policy, demo mounts
+src/app.ts        dashboard API, hosted MCP endpoints, SSRF policy, demo mounts (stateful + stateless modes)
+src/web.ts        local/Docker/Render entry (listens on PORT)
+src/token.ts      sealed stateless tokens (AES-256-GCM)
+api/index.js      Vercel entry
+vercel.json       Vercel routing
 src/mock-api.ts   in-memory Task Manager REST API
 public/index.html single-file dashboard (no build step)
 demo/             openapi.yaml, mock-server.ts, agent.ts (verification client)

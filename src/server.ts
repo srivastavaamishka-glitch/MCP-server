@@ -100,16 +100,36 @@ export function createMcpServer(engine: Engine): Server {
  * Mounts Streamable HTTP (`{prefix}/mcp`) and legacy SSE (`{prefix}/sse` + `{prefix}/messages`).
  * The caller must have installed `express.json()`. `getEngine` may return undefined to 404.
  */
-export function mountMcpHttp(app: Express, getEngine: (req: Request) => Engine | undefined, prefix = "") {
+export function mountMcpHttp(
+  app: Express,
+  getEngine: (req: Request) => Engine | undefined | Promise<Engine | undefined>,
+  prefix = "",
+  stateless = false,
+) {
   const streams: Record<string, StreamableHTTPServerTransport> = {};
   const sse: Record<string, SSEServerTransport> = {};
   const rpcError = (res: Response, status: number, message: string) => res.status(status).json({ jsonrpc: "2.0", error: { code: -32000, message }, id: null });
+
+  if (stateless) {
+    // Serverless: no session state. Every POST builds a throwaway server + transport, answers, and is discarded.
+    app.post(`${prefix}/mcp`, async (req, res) => {
+      const engine = await getEngine(req);
+      if (!engine) return rpcError(res, 404, "Unknown or invalid MCP endpoint");
+      const server = createMcpServer(engine);
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      res.on("close", () => { void transport.close(); void server.close(); });
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    });
+    app.all(`${prefix}/mcp`, (_req, res) => rpcError(res, 405, "Stateless endpoint: use POST"));
+    return;
+  }
 
   app.all(`${prefix}/mcp`, async (req, res) => {
     let t = streams[String(req.headers["mcp-session-id"])];
     if (!t) {
       if (req.method !== "POST" || !isInitializeRequest(req.body)) return rpcError(res, 400, "No valid session: send an initialize request first");
-      const engine = getEngine(req);
+      const engine = await getEngine(req);
       if (!engine) return rpcError(res, 404, "Unknown MCP endpoint");
       const transport: StreamableHTTPServerTransport = (t = new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
@@ -122,7 +142,7 @@ export function mountMcpHttp(app: Express, getEngine: (req: Request) => Engine |
   });
 
   app.get(`${prefix}/sse`, async (req, res) => {
-    const engine = getEngine(req);
+    const engine = await getEngine(req);
     if (!engine) return void res.status(404).send("Unknown MCP endpoint");
     const t = new SSEServerTransport(req.originalUrl.split("?")[0].replace(/\/sse$/, "/messages"), res);
     sse[t.sessionId] = t;
