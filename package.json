@@ -1,0 +1,40 @@
+{
+  "name": "anything-to-mcp",
+  "version": "1.0.0",
+  "description": "Turn any OpenAPI 3.x spec into a live, typed MCP server. Dynamic engine, no codegen step.",
+  "type": "module",
+  "bin": {
+    "anything-to-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "public",
+    "demo/openapi.yaml"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "start": "tsx src/web.ts",
+    "start:prod": "node dist/web.js",
+    "mock": "tsx demo/mock-server.ts",
+    "demo": "tsx demo/agent.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "@apidevtools/json-schema-ref-parser": "^16.0.5",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ajv": "^8.20.0",
+    "express": "^4.22.3",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anything-to-MCP</title>
+<style>
+  :root { --bg:#fafaf9; --panel:#fff; --ink:#1c1917; --mute:#78716c; --line:#e7e5e4; --accent:#4f46e5; --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --code:#f5f5f4; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0c0a09; --panel:#1c1917; --ink:#fafaf9; --mute:#a8a29e; --line:#292524; --accent:#818cf8; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --code:#0c0a09; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui, sans-serif; }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:18px; } header span { color:var(--mute); }
+  main { display:grid; grid-template-columns: 320px minmax(0,1fr) 360px; gap:16px; padding:16px 24px; align-items:start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; padding:16px; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  h2 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); }
+  label { display:block; margin:10px 0 4px; font-weight:600; font-size:12px; }
+  input[type=text], input[type=password], textarea { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--code); color:var(--ink); font:12px ui-monospace, monospace; }
+  textarea { min-height:90px; resize:vertical; }
+  button { padding:7px 12px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); cursor:pointer; font:inherit; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  .err { color:var(--bad); margin-top:8px; white-space:pre-wrap; } .hint { color:var(--mute); font-size:12px; margin-top:6px; }
+  .tool { border:1px solid var(--line); border-radius:8px; margin-bottom:8px; }
+  .tool > summary { padding:9px 11px; cursor:pointer; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .tool .body { padding:0 11px 11px; } .tool p { margin:4px 0 8px; color:var(--mute); }
+  .badge { font:600 11px ui-monospace, monospace; padding:1px 6px; border-radius:4px; background:var(--code); border:1px solid var(--line); }
+  .badge.ro { color:var(--ok); } .badge.w { color:var(--warn); }
+  .path { font:12px ui-monospace, monospace; color:var(--mute); }
+  pre { margin:6px 0; padding:8px; background:var(--code); border:1px solid var(--line); border-radius:6px; overflow:auto; font:12px ui-monospace, monospace; max-height:240px; white-space:pre-wrap; word-break:break-word; }
+  .diff span { display:inline-block; margin-right:10px; font:12px ui-monospace, monospace; } .add { color:var(--ok); } .rem { color:var(--bad); } .chg { color:var(--warn); }
+  .cmd { display:flex; gap:6px; align-items:flex-start; margin-bottom:8px; } .cmd pre { flex:1; margin:0; max-height:none; }
+  .log { font:12px ui-monospace, monospace; padding:4px 0; border-bottom:1px solid var(--line); } .log.bad { color:var(--bad); }
+  #log { max-height:340px; overflow:auto; }
+</style>
+</head>
+<body>
+<header><h1>Anything-to-MCP</h1><span>OpenAPI 3.x in, live MCP server out. No codegen, no build step.</span></header>
+<main>
+  <section>
+    <h2>1 · Source</h2>
+    <label for="spec">OpenAPI URL, or paste YAML / JSON</label>
+    <textarea id="spec" spellcheck="false" placeholder="https://example.com/openapi.yaml"></textarea>
+    <div class="row"><button id="demo">Load demo</button><button id="demoAuth">Demo with auth</button></div>
+    <label><input type="checkbox" id="ro"> Read-only mode (strip every non-GET operation)</label>
+    <label for="base">Base URL override (optional)</label>
+    <input type="text" id="base" placeholder="defaults to servers[0].url in the spec">
+    <label for="bearer">Bearer token</label>
+    <input type="password" id="bearer" autocomplete="off">
+    <label for="apikey">API key <span class="hint">(header name:</span> <input type="text" id="keyname" placeholder="X-API-Key" style="width:110px;display:inline"><span class="hint">)</span></label>
+    <input type="password" id="apikey" autocomplete="off">
+    <div class="row"><button class="primary" id="gen">Generate server</button><button id="reset" title="Start a new session instead of updating this one">New session</button></div>
+    <div class="err" id="err"></div>
+    <div class="hint">Credentials are held in server memory for this session only and injected into downstream requests. They are never shown in tool output.</div>
+  </section>
+
+  <section>
+    <h2>2 · Tools <span id="meta"></span></h2>
+    <div id="diff" class="diff"></div>
+    <div id="tools"><div class="hint">Nothing generated yet. Click "Load demo", then "Generate server".</div></div>
+  </section>
+
+  <section>
+    <h2>3 · Connect</h2>
+    <div id="connect"><div class="hint">Commands appear after generation.</div></div>
+    <h2 style="margin-top:16px">Live log</h2>
+    <div class="hint">Shows calls from this page and from any MCP client connected to the hosted endpoint.</div>
+    <div id="log"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+// DOM builder that only ever sets textContent: specs are untrusted input, so nothing from them touches innerHTML.
+const h = (tag, attrs = {}, ...kids) => { const e = Object.assign(document.createElement(tag), attrs); e.append(...kids.flat().filter((k) => k != null)); return e; };
+let sid = null, events = null;
+
+const api = async (path, body) => {
+  const r = await fetch(path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : undefined);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+};
+
+const skeleton = (schema) => Object.fromEntries((schema.required || []).map((k) => {
+  const p = schema.properties[k] || {}, t = [p.type].flat()[0];
+  return [k, p.enum ? p.enum[0] : p.default ?? ({ integer: 1, number: 1, boolean: false, array: [], object: {} }[t] ?? "string")];
+}));
+
+const copyable = (text) => h("div", { className: "cmd" }, h("pre", { textContent: text }),
+  h("button", { textContent: "Copy", onclick: (e) => { navigator.clipboard.writeText(text); e.target.textContent = "Copied"; setTimeout(() => (e.target.textContent = "Copy"), 1200); } }));
+
+function renderTool(t) {
+  const args = h("textarea", { value: JSON.stringify(skeleton(t.inputSchema), null, 2), spellcheck: false });
+  const out = h("pre", { hidden: true });
+  const run = h("button", { className: "primary", textContent: "Run tool", onclick: async () => {
+    run.disabled = true; out.hidden = false; out.textContent = "…";
+    try {
+      const r = await api("/api/call", { id: sid, tool: t.name, args: JSON.parse(args.value || "{}") });
+      out.textContent = r.content[0].text; out.style.color = r.isError ? "var(--bad)" : "";
+    } catch (e) { out.textContent = "Error: " + e.message; out.style.color = "var(--bad)"; }
+    run.disabled = false;
+  } });
+  return h("details", { className: "tool" },
+    h("summary", {}, h("span", { className: "badge " + (t.readOnlyHint ? "ro" : "w"), textContent: t.method }), h("strong", { textContent: t.name }), h("span", { className: "path", textContent: t.path })),
+    h("div", { className: "body" }, h("p", { textContent: t.description }),
+      h("div", { className: "hint", textContent: "inputSchema (JSON Schema Draft-07)" }), h("pre", { textContent: JSON.stringify(t.inputSchema, null, 2) }),
+      h("div", { className: "hint", textContent: "Arguments" }), args, h("div", { className: "row" }, run), out));
+}
+
+function render(s) {
+  $("meta").textContent = `· ${s.title} v${s.version} · ${s.tools.length} tools${s.skipped.length ? ` · ${s.skipped.length} write ops removed` : ""} · ${s.baseUrl || "no base URL"}`;
+  $("tools").replaceChildren(...s.tools.map(renderTool));
+  if (s.skipped.length) $("tools").append(h("div", { className: "hint", textContent: "Removed by read-only mode (not present in the protocol layer): " + s.skipped.join(", ") }));
+  const c = s.connect;
+  $("connect").replaceChildren(
+    h("div", { className: "hint", textContent: "Hosted endpoint (Streamable HTTP)" }), copyable(c.streamableHttp),
+    h("div", { className: "hint", textContent: "Claude Code" }), copyable(c.claudeCode),
+    h("div", { className: "hint", textContent: "Run locally (stdio)" }), copyable(c.npx),
+    h("div", { className: "hint", textContent: "Docker" }), copyable(c.docker),
+    h("div", { className: "hint", textContent: "Legacy SSE: " + c.sse }));
+}
+
+function showDiff(d) {
+  if (!d) return;
+  const n = d.added.length + d.removed.length + d.changed.length;
+  $("diff").replaceChildren(n ? h("div", { className: "hint" }, "Tool diff vs previous: ",
+    ...d.added.map((x) => h("span", { className: "add", textContent: "+ " + x })),
+    ...d.removed.map((x) => h("span", { className: "rem", textContent: "− " + x })),
+    ...d.changed.map((x) => h("span", { className: "chg", textContent: "~ " + x }))) : "");
+}
+
+function listen() {
+  events?.close();
+  events = new EventSource("/api/events/" + sid);
+  events.addEventListener("call", (e) => {
+    const l = JSON.parse(e.data);
+    $("log").prepend(h("div", { className: "log" + (l.isError ? " bad" : "") },
+      `${new Date(l.ts).toLocaleTimeString()}  ${l.tool}(${JSON.stringify(l.args ?? {})})  →  ${l.preview}  [${l.ms}ms]`));
+  });
+  events.addEventListener("change", async (e) => { showDiff(JSON.parse(e.data)); render(await api("/api/session/" + sid)); });
+}
+
+$("gen").onclick = async () => {
+  $("err").textContent = ""; $("gen").disabled = true;
+  try {
+    const s = await api("/api/generate", {
+      id: sid, spec: $("spec").value, readOnly: $("ro").checked, baseUrl: $("base").value,
+      auth: { bearer: $("bearer").value, apiKey: $("apikey").value, apiKeyName: $("keyname").value },
+    });
+    const fresh = sid !== s.id; sid = s.id;
+    render(s); showDiff(fresh ? null : s.diff);
+    if (fresh) listen();
+  } catch (e) { $("err").textContent = e.message; }
+  $("gen").disabled = false;
+};
+$("reset").onclick = () => { sid = null; events?.close(); $("tools").replaceChildren(); $("connect").replaceChildren(); $("log").replaceChildren(); $("diff").replaceChildren(); $("meta").textContent = ""; };
+const demo = (secure) => async () => {
+  const cfg = await api("/api/config");
+  $("spec").value = location.origin + "/demo/openapi.yaml";
+  $("base").value = location.origin + (secure ? "/demo-api-auth" : "/demo-api");
+  $("bearer").value = secure ? cfg.demoToken : "";
+};
+$("demo").onclick = demo(false);
+$("demoAuth").onclick = demo(true);
+</script>
+</body>
+</html>

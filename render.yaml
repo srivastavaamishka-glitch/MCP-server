@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: anything-to-mcp
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev --ignore-scripts && npm run build
+    startCommand: node dist/web.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REPO_SLUG
+        value: srivastavaamishka-glitch/MCP-server
